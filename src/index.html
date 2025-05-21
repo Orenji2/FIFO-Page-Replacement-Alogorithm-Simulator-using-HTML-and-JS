@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FIFO Page Replacement Simulator</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Roboto&display=swap');
+  body {
+    font-family: 'Inter', sans-serif;
+    background: #131313;
+    color: #ffffff;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+  }
+
+  header {
+    padding: 2rem;
+    text-align: center;
+  }
+
+  header h1 {
+    font-weight: 700;
+    font-size: 2rem;
+    margin: 0;
+    color: #4fc3f7;
+
+  }
+
+  main {
+    background: #2b2b2b;
+    padding: 2rem;
+    border-radius: 10px;
+    width: 90%;
+    max-width: 900px;
+  }
+
+  label {
+    font-weight: 600;
+    margin-bottom: 0.3rem;
+    display: block;
+  }
+
+  input[type="text"], select {
+    padding: 0.5rem;
+    width: 100%;
+    border-radius: 6px;
+    border: none;
+    font-size: 1rem;
+    margin-bottom: 1rem;
+    outline: none;
+    box-sizing: border-box;
+    background-color: #383838;
+    color: #ffffff;
+  }
+
+  button {
+    background: #007aff;
+    border: none;
+    padding: 0.7rem 1.4rem;
+    font-weight: 700;
+    border-radius: 6px;
+    cursor: pointer;
+    color: #ffffff;
+    transition: background-color 0.2s ease;
+    margin-right: 1rem;
+  }
+  button:hover {
+    background: #29b6f6;
+  }
+  button:disabled {
+    background: #777;
+    box-shadow: none;
+    cursor: not-allowed;
+  }
+
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    margin-bottom: 1.5rem;
+    gap: 1rem;
+    align-items: flex-end;
+  }
+
+  .output {
+    overflow-x: auto;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 1rem;
+    text-align: center;
+  }
+
+  th, td {
+    padding: 0.5rem;
+    border: 1px solid #333;
+  }
+
+  th {
+    background: #2196f3;
+    color: #fff;
+
+  }
+
+  td.frame-hit {
+    background: #388e3c;
+    color: #d0f0d0;
+    font-weight: 700;
+  }
+
+  td.frame-miss {
+    background: #d32f2f;
+    color: #f8d7da;
+    font-weight: 700;
+  }
+
+  .page-fault-count {
+    margin-top: 1rem;
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: #ff7043;
+    text-align: right;
+    user-select:none;
+  }
+
+  footer {
+    margin-top: auto;
+    padding: 1rem;
+    font-size: 0.85rem;
+    color: #888;
+  }
+
+  @media (max-width: 600px) {
+    .controls {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    button {
+      width: 100%;
+      margin-right: 0;
+    }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>FIFO Page Replacement Simulator</h1>
+</header>
+<main>
+  <div class="controls">
+    <div style="flex:1 1 50%;">
+      <label for="frameCount">Number of Frames (3 - 5):</label>
+      <select id="frameCount" aria-label="Number of Frames">
+        <option value="3">3</option>
+        <option value="4">4</option>
+        <option value="5" selected>5</option>
+      </select>
+    </div>
+    <div style="flex:1 1 50%;">
+      <label for="referenceString">Reference String (at least 20 numbers, space separated):</label>
+      <input type="text" id="referenceString" aria-label="Reference String" spellcheck="false" autocomplete="off" />
+    </div>
+  </div>
+  <div class="controls" style="justify-content: flex-start;">
+    <button id="generateBtn" aria-label="Generate Random Reference String">Generate Random Reference String</button>
+    <button id="runBtn" aria-label="Run FIFO Simulation">Run Simulation</button>
+  </div>
+
+  <div class="output" aria-live="polite" aria-atomic="true" aria-relevant="additions">
+    <!-- Simulation output will appear here -->
+  </div>
+</main>
+
+
+<script>
+  // Minimum length of reference string
+  const MIN_REF_LENGTH = 20;
+
+  const frameCountSelect = document.getElementById('frameCount');
+  const referenceStringInput = document.getElementById('referenceString');
+  const generateBtn = document.getElementById('generateBtn');
+  const runBtn = document.getElementById('runBtn');
+  const outputDiv = document.querySelector('.output');
+
+  // Generate a random reference string of at least MIN_REF_LENGTH elements with pages between 0 and 9
+  function generateRandomReferenceString() {
+    const length = MIN_REF_LENGTH; // Random length between 20 and 29
+    let arr = [];
+    for (let i = 0; i < length; i++) {
+      arr.push(Math.floor(Math.random() * 10)); // page numbers 0-9
+    }
+    return arr.join(' ');
+  }
+
+  generateBtn.addEventListener('click', () => {
+    const refStr = generateRandomReferenceString();
+    referenceStringInput.value = refStr;
+    outputDiv.innerHTML = ''; // Clear output
+  });
+
+  function validateReferenceString(refString) {
+    if (!refString) return false;
+    // Split by whitespace, filter out empty strings
+    const pages = refString.trim().split(/\s+/);
+    if (pages.length < MIN_REF_LENGTH) return false;
+    // Check if all are integers between 0 and 99 (assuming page number max 99)
+    for (const p of pages) {
+      if (!/^\d+$/.test(p) || +p > 99) return false;
+    }
+    return true;
+  }
+
+  function runFIFOSimulation(framesCount, referencePages) {
+    const frames = [];
+    const queue = [];
+    let pageFaults = 0;
+
+    // For output: array of step objects with frame status + if it's fault or not
+    const steps = [];
+
+    for (let i = 0; i < referencePages.length; i++) {
+      const page = referencePages[i];
+      let hit = false;
+
+      if (frames.includes(page)) {
+        hit = true;
+        // No replacement, no page fault
+      } else {
+        pageFaults++;
+        if (frames.length < framesCount) {
+          // still space in frames
+          frames.push(page);
+          queue.push(page);
+        } else {
+          // Replace oldest page (FIFO)
+          const oldestPage = queue.shift();
+          const replaceIndex = frames.indexOf(oldestPage);
+          frames[replaceIndex] = page;
+          queue.push(page);
+        }
+      }
+
+      steps.push({
+        currentPage: page,
+        frames: [...frames],
+        pageFault: !hit
+      });
+    }
+    return { steps, pageFaults };
+  }
+
+  function generateTable(steps, frameCount) {
+    // Create table element
+    const table = document.createElement('table');
+    // Header row
+    const thead = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    const stepTh = document.createElement('th');
+    stepTh.textContent = 'Step';
+    headRow.appendChild(stepTh);
+    const pageTh = document.createElement('th');
+    pageTh.textContent = 'Page Reference';
+    headRow.appendChild(pageTh);
+    for (let i = 0; i < frameCount; i++) {
+      const th = document.createElement('th');
+      th.textContent = `Frame ${i + 1}`;
+      headRow.appendChild(th);
+    }
+    const faultTh = document.createElement('th');
+    faultTh.textContent = 'Page Fault';
+    headRow.appendChild(faultTh);
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    // Body rows
+    const tbody = document.createElement('tbody');
+    steps.forEach((step, idx) => {
+      const tr = document.createElement('tr');
+      // Step number
+      const stepTd = document.createElement('td');
+      stepTd.textContent = idx + 1;
+      tr.appendChild(stepTd);
+
+      // Current page
+      const pageTd = document.createElement('td');
+      pageTd.textContent = step.currentPage;
+      tr.appendChild(pageTd);
+
+      // Frame contents
+      for (let f = 0; f < frameCount; f++) {
+        const td = document.createElement('td');
+        if (step.frames[f] !== undefined) {
+          td.textContent = step.frames[f];
+          // Highlight if this page equals current page
+          if (step.frames[f] === step.currentPage) {
+            td.style.fontWeight = '700';
+            td.style.color = step.pageFault ? '#d32f2f' : '#388e3c'; // red if fault else green
+          }
+        } else {
+          td.textContent = '-';
+          td.style.color = '#777';
+        }
+        tr.appendChild(td);
+      }
+
+      // Page fault indicator
+      const faultTd = document.createElement('td');
+      faultTd.textContent = step.pageFault ? 'Yes' : 'No';
+      faultTd.className = step.pageFault ? 'frame-miss' : 'frame-hit';
+      tr.appendChild(faultTd);
+
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    return table;
+  }
+
+  runBtn.addEventListener('click', () => {
+    const refString = referenceStringInput.value.trim();
+    if (!validateReferenceString(refString)) {
+      alert(`Please enter a valid reference string with at least ${MIN_REF_LENGTH} numbers.`);
+      return;
+    }
+    const framesCount = +frameCountSelect.value;
+    const pages = refString.split(/\s+/).map(Number);
+
+    // Run simulation
+    const { steps, pageFaults } = runFIFOSimulation(framesCount, pages);
+
+    // Generate output table
+    const table = generateTable(steps, framesCount);
+
+    outputDiv.innerHTML = '';
+    outputDiv.appendChild(table);
+
+    // Show total page faults
+    const faultsDiv = document.createElement('div');
+    faultsDiv.className = 'page-fault-count';
+    faultsDiv.textContent = `Total Page Faults: ${pageFaults} / ${pages.length} references`;
+    outputDiv.appendChild(faultsDiv);
+  });
+
+  // On page load, generate an initial random reference string
+  document.addEventListener('DOMContentLoaded', () => {
+    referenceStringInput.value = generateRandomReferenceString();
+  });
+</script>
+</body>
+</html>
+
